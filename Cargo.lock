@@ -2566,6 +2566,7 @@ version = "0.14.2"
 dependencies = [
  "iced_highlighter",
  "iced_renderer",
+ "iced_test",
  "log",
  "num-traits",
  "ouroboros",

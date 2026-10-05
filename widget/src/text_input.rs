@@ -722,17 +722,25 @@ where
 
                 let click_position = cursor.position_over(layout.bounds());
 
-                state.is_focused = if click_position.is_some() {
+                if click_position.is_some() {
                     let now = Instant::now();
 
-                    Some(Focus {
+                    state.is_focused = Some(Focus {
                         updated_at: now,
                         now,
                         is_window_focused: true,
-                    })
-                } else {
-                    None
-                };
+                    });
+                } else if let Some(content) = state.blur()
+                    && commit_preedit(
+                        &mut self.value,
+                        state,
+                        content,
+                        self.on_input.as_deref(),
+                        shell,
+                    )
+                {
+                    update_cache(state, &self.value);
+                }
 
                 if let Some(cursor_position) = click_position {
                     let text_layout = layout.children().next().unwrap();
@@ -1233,7 +1241,18 @@ where
                             shell.capture_event();
                         }
                         keyboard::Key::Named(key::Named::Escape) => {
-                            state.is_focused = None;
+                            if let Some(content) = state.blur()
+                                && commit_preedit(
+                                    &mut self.value,
+                                    state,
+                                    content,
+                                    self.on_input.as_deref(),
+                                    shell,
+                                )
+                            {
+                                update_cache(state, &self.value);
+                            }
+
                             state.is_dragging = None;
                             state.is_pasting = None;
 
@@ -1525,6 +1544,17 @@ impl<P: text::Paragraph> State<P> {
         self.is_focused = None;
     }
 
+    /// Unfocuses the [`TextInput`] and returns the text that the input method
+    /// was still composing, if any.
+    fn blur(&mut self) -> Option<String> {
+        let _ = self.is_focused.take()?;
+
+        self.preedit
+            .take()
+            .map(|preedit| preedit.content)
+            .filter(|content| !content.is_empty())
+    }
+
     /// Moves the [`Cursor`] of the [`TextInput`] to the front of the input text.
     pub fn move_cursor_to_front(&mut self) {
         self.cursor.move_to(0);
@@ -1658,6 +1688,32 @@ fn find_cursor_position<P: text::Paragraph>(
         )
         .count(),
     )
+}
+
+/// Inserts the text that the input method was still composing when the
+/// [`TextInput`] lost focus, like native text fields do.
+///
+/// The event is not captured, so the widget that took the focus away (e.g.
+/// a button) still handles it.
+///
+/// Returns `true` if the value changed.
+fn commit_preedit<P: text::Paragraph, Message>(
+    value: &mut Value,
+    state: &mut State<P>,
+    content: String,
+    on_input: Option<&dyn Fn(String) -> Message>,
+    shell: &mut Shell<'_, Message>,
+) -> bool {
+    let Some(on_input) = on_input else {
+        return false;
+    };
+
+    let mut editor = Editor::new(value, &mut state.cursor);
+    editor.paste(Value::new(&content));
+
+    shell.publish(on_input(editor.contents()));
+
+    true
 }
 
 fn replace_paragraph<Renderer>(

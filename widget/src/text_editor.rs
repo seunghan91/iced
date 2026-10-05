@@ -566,6 +566,17 @@ impl<Highlighter: text::Highlighter> State<Highlighter> {
     pub fn is_focused(&self) -> bool {
         self.focus.is_some()
     }
+
+    /// Unfocuses the [`TextEditor`] and returns the text that the input
+    /// method was still composing, if any.
+    fn blur(&mut self) -> Option<String> {
+        let _ = self.focus.take()?;
+
+        self.preedit
+            .take()
+            .map(|preedit| preedit.content)
+            .filter(|content| !content.is_empty())
+    }
 }
 
 impl<Highlighter: text::Highlighter> operation::Focusable
@@ -816,8 +827,17 @@ where
 
                         match binding {
                             Binding::Unfocus => {
-                                state.focus = None;
                                 state.drag_click = None;
+
+                                // Commit the text that the input method was
+                                // still composing, like native text fields
+                                // do. The event is not captured, so the widget
+                                // that took the focus away still handles it.
+                                if let Some(content) = state.blur() {
+                                    publish(Action::Edit(Edit::Paste(
+                                        Arc::new(content),
+                                    )));
+                                }
                             }
                             Binding::Copy => {
                                 if let Some(selection) = content.selection() {
